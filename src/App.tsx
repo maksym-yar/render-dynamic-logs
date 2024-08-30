@@ -1,11 +1,70 @@
 import { useEffect, useRef, useState } from 'react';
-import { FixedSizeList as List } from "react-window";
-import 'tailwindcss/tailwind.css'; // Ensure Tailwind CSS is imported
+import { FixedSizeList as List, ListOnScrollProps } from "react-window";
+import 'tailwindcss/tailwind.css';
+
+class Node {
+  value: string;
+  next: Node | null = null;
+
+  constructor(value: string) {
+    this.value = value;
+  }
+}
+
+class LinkedList {
+  head: Node | null = null;
+  tail: Node | null = null;
+  length: number = 0;
+
+  constructor(list?: LinkedList) {
+    if (list) {
+      this.head = list.head;
+      this.tail = list.tail;
+      this.length = list.length;
+    }
+  }
+
+  append(value: string) {
+    const newNode = new Node(value);
+    if (!this.head) {
+      this.head = newNode;
+      this.tail = newNode;
+    } else {
+      this.tail!.next = newNode;
+      this.tail = newNode;
+    }
+    this.length++;
+
+    return this
+  }
+
+  get(index: number): string | null {
+    let current = this.head;
+    let count = 0;
+    while (current) {
+      if (count === index) {
+        return current.value;
+      }
+      current = current.next;
+      count++;
+    }
+    return null;
+  }
+}
+
+const MAX_HEIGHT = 10737418;
+const ITEM_HEIGHT = 20; // Assuming each item has a fixed height
+const MAX_ITEMS = Math.floor(MAX_HEIGHT / ITEM_HEIGHT);
 
 function App() {
-  const [logs, setLogs] = useState<string[]>([]);
   const [autoScroll, setAutoScroll] = useState(true);
+  const autoScrollRef = useRef(autoScroll);
+  const [startIndex, setStartIndex] = useState(0);
   const logContainerRef = useRef<List>(null);
+  const downloadBytes = useRef(0);
+  const [logs, setLogs] = useState(new LinkedList());
+
+  const scrollOffsetRef = useRef(0);
 
   useEffect(() => {
     const socket = new WebSocket(`wss://test-log-viewer-backend.stg.onepunch.agency/view-log-ws`);
@@ -15,31 +74,58 @@ function App() {
     });
 
     socket.addEventListener("message", (event) => {
-      const newLog = event.data;
+      const newLog = event.data as string;
 
-      setLogs(prevLogs => [...prevLogs, newLog]);
+      downloadBytes.current += new Blob([newLog]).size
+
+      const totalSize = 1 * 1024 * 1024 * 1024; // 1GB in bytes
+      document.title = `${((downloadBytes.current / totalSize) * 100).toFixed(2)}%`;
+
+      setLogs(prevList => {
+        prevList.append(newLog);
+
+        if (prevList.length > MAX_ITEMS) {
+          const el = document.querySelector('.list')?.children[0]
+
+          if (el) {
+            const newStartIndex = Math.min(Math.floor(scrollOffsetRef.current / el.scrollHeight * prevList.length), prevList.length - MAX_ITEMS);
+            setStartIndex(newStartIndex);
+          }
+        }
+
+        return new LinkedList(prevList);
+      })
     });
 
     return () => {
       socket.close();
     };
-  }, []);
+  }, [])
 
   useEffect(() => {
-    if (autoScroll && logContainerRef.current) {
-      logContainerRef.current.scrollToItem(logs.length - 1, 'end');
-    }
+    requestAnimationFrame(() => {
+      if (autoScroll && logContainerRef.current) {
+        logContainerRef.current.scrollToItem(logs.length - 1, 'end');
+      }
+    })
   }, [logs, autoScroll]);
 
   const toggleAutoScroll = () => {
     setAutoScroll(!autoScroll);
+    autoScrollRef.current = !autoScroll;
   };
 
-  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => (
-    <div style={style} className="truncate">
-      {index + 1} {logs[index]}
-    </div>
-  );
+  const handleScroll = ({ scrollOffset }: ListOnScrollProps) => {
+    scrollOffsetRef.current = scrollOffset;
+
+    const el = document.querySelector('.list')?.children[0]
+
+    if (!el) return
+
+    const itemHeight = el.scrollHeight;
+    const newStartIndex = Math.max(Math.min(Math.floor(scrollOffset / itemHeight * logs.length), logs.length - MAX_ITEMS), 0);
+    setStartIndex(newStartIndex);
+  };
 
   return (
     <div className="p-4 h-screen bg-black">
@@ -49,17 +135,29 @@ function App() {
       >
         {autoScroll ? 'Disable' : 'Enable'} Auto Scroll
       </button>
+
+      <span className='text-white'>{downloadBytes.current}</span>
     
-      <List
-        height={window.innerHeight * 0.8}
-        width="100%"
-        itemCount={logs.length}
-        itemSize={32}
-        ref={logContainerRef}
-        className='border border-gray-300 bg-gray-900 rounded text-orange-500'
-      >
-        {Row}
-      </List>
+      <div className='border p-2 border-gray-300 bg-gray-900 rounded text-orange-500'>
+        <List
+            height={window.innerHeight * 0.8}
+            width="100%"
+            itemCount={Math.min(logs.length, MAX_ITEMS)}
+            itemSize={ITEM_HEIGHT}
+            ref={logContainerRef}
+            onScroll={handleScroll}
+            className='list'
+            style={{
+              overflowX: 'hidden',
+            }}
+          >
+          {({ index, style }) => (
+            <div style={{...style, whiteSpace: 'nowrap'}} key={index}>
+              {index + startIndex} {logs.get(index + startIndex)}
+            </div>
+          )}
+        </List>
+      </div>
     </div>
   );
 }
