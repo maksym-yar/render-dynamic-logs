@@ -1,3 +1,4 @@
 # Memory usage
 
-![image](https://github.com/user-attachments/assets/49bb4cfa-6f11-4ef5-9e2e-057ca2d42b0d)
+![image](https://github.com/user-attachments/assets/a395175a-2794-4e61-b939-7bf2fdf38f06)
+
